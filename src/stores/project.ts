@@ -105,6 +105,32 @@ export const useProjectStore = defineStore('project', () => {
     selectedSegmentId.value = id
   }
 
+  function updateSegment(
+    id: string,
+    updates: Partial<{
+      startTime: number
+      endTime: number
+      title: string
+      comments: string
+      groupId: string | null
+      slowMotionSpeed: number
+    }>,
+  ) {
+    const seg = segments.value.find((s) => s.id === id)
+    if (seg) {
+      if (updates.startTime !== undefined) seg.startTime = updates.startTime
+      if (updates.endTime !== undefined) seg.endTime = updates.endTime
+      if (updates.title !== undefined) seg.title = updates.title
+      if (updates.comments !== undefined) seg.comments = updates.comments
+      if (updates.groupId !== undefined) seg.groupId = updates.groupId
+      if (updates.slowMotionSpeed !== undefined) seg.slowMotionSpeed = updates.slowMotionSpeed
+    }
+  }
+
+  function setSegments(val: Segment[]) {
+    segments.value = val
+  }
+
   function restoreState(state: {
     segments?: Segment[]
     groups?: Group[]
@@ -151,6 +177,8 @@ export const useProjectStore = defineStore('project', () => {
     removeSegment,
     deleteSelectedSegment,
     selectSegment,
+    updateSegment,
+    setSegments,
     restoreState,
   }
 })

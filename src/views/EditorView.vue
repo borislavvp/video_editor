@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useProjectStore } from '../stores/project'
 import { usePlayerStore } from '../stores/player'
+import TimelineCanvas from '../components/TimelineCanvas.vue'
 
 const projectStore = useProjectStore()
 const player = usePlayerStore()
@@ -92,6 +93,10 @@ function markOut() {
 
 function deleteSelected() {
   projectStore.deleteSelectedSegment()
+}
+
+function updateSegment(id: string, startTime: number, endTime: number) {
+  projectStore.updateSegment(id, { startTime, endTime })
 }
 
 function onVideoLoaded() {
@@ -333,47 +338,24 @@ onUnmounted(() => {
         </div>
 
         <!-- Timeline (bottom) -->
-        <div class="h-24 bg-gray-800 mx-2 mb-2 rounded-b-lg flex items-center justify-center">
-          <div v-if="projectStore.hasVideo && player.duration > 0" class="w-full h-full px-4 py-2">
-            <div class="relative w-full h-full">
-              <div class="absolute top-0 left-0 w-full h-1 bg-gray-700 rounded" />
-              <div
-                v-if="projectStore.hasInMarker"
-                class="absolute top-0 w-0.5 h-3 bg-green-400 rounded"
-                :style="{ left: (projectStore.inMarker! / player.duration) * 100 + '%' }"
-                title="In marker"
-              />
-              <div
-                v-if="projectStore.hasOutMarker"
-                class="absolute top-0 w-0.5 h-3 bg-red-400 rounded"
-                :style="{ left: (projectStore.outMarker! / player.duration) * 100 + '%' }"
-                title="Out marker"
-              />
-              <div
-                v-for="segment in projectStore.segments"
-                :key="segment.id"
-                class="absolute top-1 h-2 rounded cursor-pointer transition-colors"
-                :class="segment.id === projectStore.selectedSegmentId ? 'bg-blue-400' : 'bg-blue-500/60 hover:bg-blue-400'"
-                :style="{
-                  left: (segment.startTime / player.duration) * 100 + '%',
-                  width: Math.max(0.5, ((segment.endTime - segment.startTime) / player.duration) * 100) + '%',
-                }"
-                :title="segment.title"
-                @click="seekTo(segment.startTime); projectStore.selectSegment(segment.id)"
-              />
-              <div
-                v-if="projectStore.inMarker !== null || projectStore.outMarker !== null"
-                class="absolute top-1 h-2 rounded bg-yellow-400/50"
-                :style="{
-                  left: ((projectStore.inMarker ?? projectStore.outMarker!) / player.duration) * 100 + '%',
-                  width: projectStore.inMarker !== null && projectStore.outMarker !== null
-                    ? Math.max(0.5, ((projectStore.outMarker - projectStore.inMarker) / player.duration) * 100) + '%'
-                    : '0.5%',
-                }"
-              />
-            </div>
-          </div>
-          <p v-else class="text-gray-500 text-sm">Timeline</p>
+        <div
+          v-if="projectStore.hasVideo && player.duration > 0"
+          class="h-24 bg-gray-800 mx-2 mb-2 rounded-b-lg overflow-hidden"
+        >
+          <TimelineCanvas
+            :duration="player.duration"
+            :current-time="player.currentTime"
+            :segments="projectStore.segments"
+            :in-marker="projectStore.inMarker"
+            :out-marker="projectStore.outMarker"
+            :selected-segment-id="projectStore.selectedSegmentId"
+            @seek="seekTo"
+            @update-segment="updateSegment"
+            @select-segment="(id: string) => projectStore.selectSegment(id)"
+          />
+        </div>
+        <div v-else class="h-24 bg-gray-800 mx-2 mb-2 rounded-b-lg flex items-center justify-center">
+          <p class="text-gray-500 text-sm">Timeline</p>
         </div>
       </div>
 
