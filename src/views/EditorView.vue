@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useProjectStore } from '../stores/project'
 import { usePlayerStore } from '../stores/player'
 import TimelineCanvas from '../components/TimelineCanvas.vue'
@@ -11,6 +11,9 @@ const videoRef = ref<HTMLVideoElement | null>(null)
 const videoWidth = ref<number>(0)
 const videoHeight = ref<number>(0)
 const videoError = ref<string | null>(null)
+const editingTitleId = ref<string | null>(null)
+const editingTitleValue = ref('')
+const segmentSpeedApplied = ref(false)
 
 const FRAME_STEP = 1 / 30
 
@@ -24,6 +27,24 @@ function formatTime(seconds: number): string {
     return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(2, '0')}`
   }
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(2, '0')}`
+}
+
+function startEditingTitle(id: string) {
+  editingTitleId.value = id
+  editingTitleValue.value =
+    projectStore.segments.find((s) => s.id === id)?.title ?? ''
+  nextTick(() => {
+    const input = document.querySelector<HTMLInputElement>(
+      `input[data-segment-title="${id}"]`,
+    )
+    input?.focus()
+    input?.select()
+  })
+}
+
+function saveTitle(id: string) {
+  projectStore.updateSegmentTitle(id, editingTitleValue.value)
+  editingTitleId.value = null
 }
 
 function togglePlay() {
@@ -115,6 +136,22 @@ function onTimeUpdate() {
   const v = videoRef.value
   if (!v) return
   player.updateTime(v.currentTime)
+
+  const seg = projectStore.selectedSegment
+  if (seg && seg.slowMotionSpeed !== 1 && !player.slowMotionActive) {
+    if (v.currentTime >= seg.startTime && v.currentTime <= seg.endTime) {
+      if (v.playbackRate !== seg.slowMotionSpeed) {
+        v.playbackRate = seg.slowMotionSpeed
+        segmentSpeedApplied.value = true
+      }
+    } else if (segmentSpeedApplied.value) {
+      v.playbackRate = 1
+      segmentSpeedApplied.value = false
+    }
+  } else if (segmentSpeedApplied.value && !player.slowMotionActive) {
+    v.playbackRate = 1
+    segmentSpeedApplied.value = false
+  }
 }
 
 function onPlay() {
@@ -393,10 +430,58 @@ onUnmounted(() => {
               :class="segment.id === projectStore.selectedSegmentId ? 'bg-gray-700/80' : 'hover:bg-gray-700/40'"
               @click="seekTo(segment.startTime); projectStore.selectSegment(segment.id)"
             >
-              <p class="text-sm text-gray-300 font-medium truncate">{{ segment.title }}</p>
+              <div
+                v-if="editingTitleId !== segment.id"
+                class="text-sm text-gray-300 font-medium truncate cursor-text hover:text-white"
+                @click.stop="startEditingTitle(segment.id); projectStore.selectSegment(segment.id)"
+              >
+                {{ segment.title }}
+              </div>
+              <input
+                v-else
+                :data-segment-title="segment.id"
+                v-model="editingTitleValue"
+                class="text-sm bg-gray-700 text-gray-100 rounded px-1.5 py-0.5 w-full border border-gray-600 focus:border-blue-500 focus:outline-none"
+                @keydown.enter.prevent="saveTitle(segment.id)"
+                @blur="saveTitle(segment.id)"
+                @click.stop
+              />
               <p class="text-xs text-gray-500 font-mono mt-0.5">
                 {{ formatTime(segment.startTime) }} - {{ formatTime(segment.endTime) }}
               </p>
+              <span
+                v-if="segment.slowMotionSpeed !== 1"
+                class="inline-block mt-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400"
+              >
+                {{ segment.slowMotionSpeed }}x
+              </span>
+
+              <div
+                v-if="segment.id === projectStore.selectedSegmentId"
+                class="mt-2 space-y-2"
+                @click.stop
+              >
+                <textarea
+                  :value="segment.comments"
+                  class="w-full bg-gray-700 text-gray-200 text-xs rounded px-2 py-1.5 h-16 resize-y border border-gray-600 focus:border-blue-500 focus:outline-none placeholder-gray-500"
+                  placeholder="Add tactical notes..."
+                  @input="projectStore.updateSegmentComments(segment.id, ($event.target as HTMLTextAreaElement).value)"
+                />
+
+                <div class="flex items-center gap-2">
+                  <label class="text-xs text-gray-500 shrink-0">Speed:</label>
+                  <select
+                    :value="segment.slowMotionSpeed"
+                    class="flex-1 bg-gray-700 text-gray-200 text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500 focus:outline-none"
+                    @change="projectStore.updateSegmentSlowMotionSpeed(segment.id, Number(($event.target as HTMLSelectElement).value))"
+                  >
+                    <option :value="1">1x (Normal)</option>
+                    <option :value="0.75">0.75x</option>
+                    <option :value="0.5">0.5x</option>
+                    <option :value="0.25">0.25x</option>
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
         </div>
