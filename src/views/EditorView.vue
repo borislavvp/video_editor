@@ -21,6 +21,8 @@ const editingGroupTitleValue = ref('')
 const dragState = ref<{ type: 'segment'; segmentId: string } | { type: 'group'; groupId: string } | null>(null)
 const dragOverSegment = ref<{ segmentId: string; position: 'before' | 'after' } | null>(null)
 const dragOverGroup = ref<string | null>(null)
+const exportingSegmentId = ref<string | null>(null)
+const exportError = ref<string | null>(null)
 
 const FRAME_STEP = 1 / 30
 
@@ -350,6 +352,28 @@ function onGroupHeaderDrop(e: DragEvent, targetGroupId: string) {
   onGroupDragEnd()
 }
 
+async function exportSegment(segmentId: string) {
+  const segment = projectStore.segments.find((s) => s.id === segmentId)
+  if (!segment || !projectStore.sourceVideoPath || !projectStore.sourceVideoFileName) return
+
+  exportingSegmentId.value = segmentId
+  exportError.value = null
+
+  const result = await window.electronAPI.exportSegment({
+    startTime: segment.startTime,
+    endTime: segment.endTime,
+    sourceVideoPath: projectStore.sourceVideoPath,
+    sourceVideoFileName: projectStore.sourceVideoFileName,
+    slowMotionSpeed: segment.slowMotionSpeed,
+  })
+
+  exportingSegmentId.value = null
+
+  if (!result.success) {
+    exportError.value = result.error ?? 'Export failed'
+    setTimeout(() => { exportError.value = null }, 5000)
+  }
+}
 function onVideoLoaded() {
   const v = videoRef.value
   if (!v) return
@@ -674,6 +698,9 @@ onUnmounted(() => {
               Press <kbd class="text-gray-400 bg-gray-700 px-1 rounded text-xs">I</kbd> then <kbd class="text-gray-400 bg-gray-700 px-1 rounded text-xs">O</kbd> to mark segments
             </p>
           </div>
+          <div v-if="exportError" class="px-4 py-2 bg-red-500/10 border-b border-red-500/20">
+            <p class="text-xs text-red-400">{{ exportError }}</p>
+          </div>
           <div v-else>
             <!-- Ungrouped section -->
             <div
@@ -691,7 +718,7 @@ onUnmounted(() => {
                 <div
                   v-for="segment in getGroupSegments(null)"
                   :key="segment.id"
-                  class="px-4 py-3 cursor-pointer transition-colors relative"
+                  class="px-4 py-3 cursor-pointer transition-colors relative group"
                   :class="[
                     segment.id === projectStore.selectedSegmentId ? 'bg-gray-700/80' : 'hover:bg-gray-700/40',
                     dragState?.type === 'segment' && dragState.segmentId === segment.id ? 'opacity-40' : '',
@@ -705,31 +732,68 @@ onUnmounted(() => {
                   @drop="onSegmentDrop($event, null, segment.id, dragOverSegment?.segmentId === segment.id ? dragOverSegment.position : null)"
                 >
                   <div v-if="dragOverSegment?.segmentId === segment.id && dragOverSegment.position === 'before'" class="absolute top-0 left-2 right-2 h-0.5 bg-blue-500 rounded" />
-                  <div
-                    v-if="editingTitleId !== segment.id"
-                    class="text-sm text-gray-300 font-medium truncate cursor-text hover:text-white"
-                    @click.stop="startEditingTitle(segment.id); projectStore.selectSegment(segment.id)"
-                  >
-                    {{ segment.title }}
+                  <div class="flex items-start gap-2">
+                    <div class="flex-1 min-w-0">
+                      <div
+                        v-if="editingTitleId !== segment.id"
+                        class="text-sm text-gray-300 font-medium truncate cursor-text hover:text-white"
+                        @click.stop="startEditingTitle(segment.id); projectStore.selectSegment(segment.id)"
+                      >
+                        {{ segment.title }}
+                      </div>
+                      <input
+                        v-else
+                        :data-segment-title="segment.id"
+                        v-model="editingTitleValue"
+                        class="text-sm bg-gray-700 text-gray-100 rounded px-1.5 py-0.5 w-full border border-gray-600 focus:border-blue-500 focus:outline-none"
+                        @keydown.enter.prevent="saveTitle(segment.id)"
+                        @blur="saveTitle(segment.id)"
+                        @click.stop
+                      />
+                      <p class="text-xs text-gray-500 font-mono mt-0.5">
+                        {{ formatTime(segment.startTime) }} - {{ formatTime(segment.endTime) }}
+                      </p>
+                      <span
+                        v-if="segment.slowMotionSpeed !== 1"
+                        class="inline-block mt-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400"
+                      >
+                        {{ segment.slowMotionSpeed }}x
+                      </span>
+                    </div>
+                    <button
+                      class="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-gray-600 text-gray-500 hover:text-blue-400 transition-colors opacity-0 group-hover:opacity-100"
+                      :class="{ 'opacity-100': exportingSegmentId === segment.id }"
+                      :disabled="exportingSegmentId !== null"
+                      @click.stop="exportSegment(segment.id)"
+                      title="Export Segment"
+                    >
+                      <svg
+                        v-if="exportingSegmentId === segment.id"
+                        class="w-4 h-4 animate-spin text-blue-400"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      <svg
+                        v-else
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        class="w-4 h-4"
+                      >
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" y1="15" x2="12" y2="3" />
+                      </svg>
+                    </button>
                   </div>
-                  <input
-                    v-else
-                    :data-segment-title="segment.id"
-                    v-model="editingTitleValue"
-                    class="text-sm bg-gray-700 text-gray-100 rounded px-1.5 py-0.5 w-full border border-gray-600 focus:border-blue-500 focus:outline-none"
-                    @keydown.enter.prevent="saveTitle(segment.id)"
-                    @blur="saveTitle(segment.id)"
-                    @click.stop
-                  />
-                  <p class="text-xs text-gray-500 font-mono mt-0.5">
-                    {{ formatTime(segment.startTime) }} - {{ formatTime(segment.endTime) }}
-                  </p>
-                  <span
-                    v-if="segment.slowMotionSpeed !== 1"
-                    class="inline-block mt-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400"
-                  >
-                    {{ segment.slowMotionSpeed }}x
-                  </span>
 
                   <div
                     v-if="segment.id === projectStore.selectedSegmentId"
@@ -849,7 +913,7 @@ onUnmounted(() => {
                   <div
                     v-for="segment in getGroupSegments(group.id)"
                     :key="segment.id"
-                    class="px-4 py-3 cursor-pointer transition-colors relative"
+                    class="px-4 py-3 cursor-pointer transition-colors relative group"
                     :class="[
                       segment.id === projectStore.selectedSegmentId ? 'bg-gray-700/80' : 'hover:bg-gray-700/40',
                       dragState?.type === 'segment' && dragState.segmentId === segment.id ? 'opacity-40' : '',
@@ -863,31 +927,68 @@ onUnmounted(() => {
                     @drop="onSegmentDrop($event, group.id, segment.id, dragOverSegment?.segmentId === segment.id ? dragOverSegment.position : null)"
                   >
                     <div v-if="dragOverSegment?.segmentId === segment.id && dragOverSegment.position === 'before'" class="absolute top-0 left-2 right-2 h-0.5 bg-blue-500 rounded" />
-                    <div
-                      v-if="editingTitleId !== segment.id"
-                      class="text-sm text-gray-300 font-medium truncate cursor-text hover:text-white"
-                      @click.stop="startEditingTitle(segment.id); projectStore.selectSegment(segment.id)"
-                    >
-                      {{ segment.title }}
+                    <div class="flex items-start gap-2">
+                      <div class="flex-1 min-w-0">
+                        <div
+                          v-if="editingTitleId !== segment.id"
+                          class="text-sm text-gray-300 font-medium truncate cursor-text hover:text-white"
+                          @click.stop="startEditingTitle(segment.id); projectStore.selectSegment(segment.id)"
+                        >
+                          {{ segment.title }}
+                        </div>
+                        <input
+                          v-else
+                          :data-segment-title="segment.id"
+                          v-model="editingTitleValue"
+                          class="text-sm bg-gray-700 text-gray-100 rounded px-1.5 py-0.5 w-full border border-gray-600 focus:border-blue-500 focus:outline-none"
+                          @keydown.enter.prevent="saveTitle(segment.id)"
+                          @blur="saveTitle(segment.id)"
+                          @click.stop
+                        />
+                        <p class="text-xs text-gray-500 font-mono mt-0.5">
+                          {{ formatTime(segment.startTime) }} - {{ formatTime(segment.endTime) }}
+                        </p>
+                        <span
+                          v-if="segment.slowMotionSpeed !== 1"
+                          class="inline-block mt-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400"
+                        >
+                          {{ segment.slowMotionSpeed }}x
+                        </span>
+                      </div>
+                      <button
+                        class="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-gray-600 text-gray-500 hover:text-blue-400 transition-colors opacity-0 group-hover:opacity-100"
+                        :class="{ 'opacity-100': exportingSegmentId === segment.id }"
+                        :disabled="exportingSegmentId !== null"
+                        @click.stop="exportSegment(segment.id)"
+                        title="Export Segment"
+                      >
+                        <svg
+                          v-if="exportingSegmentId === segment.id"
+                          class="w-4 h-4 animate-spin text-blue-400"
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        <svg
+                          v-else
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          class="w-4 h-4"
+                        >
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                          <polyline points="7 10 12 15 17 10" />
+                          <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                      </button>
                     </div>
-                    <input
-                      v-else
-                      :data-segment-title="segment.id"
-                      v-model="editingTitleValue"
-                      class="text-sm bg-gray-700 text-gray-100 rounded px-1.5 py-0.5 w-full border border-gray-600 focus:border-blue-500 focus:outline-none"
-                      @keydown.enter.prevent="saveTitle(segment.id)"
-                      @blur="saveTitle(segment.id)"
-                      @click.stop
-                    />
-                    <p class="text-xs text-gray-500 font-mono mt-0.5">
-                      {{ formatTime(segment.startTime) }} - {{ formatTime(segment.endTime) }}
-                    </p>
-                    <span
-                      v-if="segment.slowMotionSpeed !== 1"
-                      class="inline-block mt-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400"
-                    >
-                      {{ segment.slowMotionSpeed }}x
-                    </span>
 
                     <div
                       v-if="segment.id === projectStore.selectedSegmentId"

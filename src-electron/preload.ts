@@ -4,8 +4,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openVideo: () => ipcRenderer.invoke('open-video'),
   cutSegment: (startTime: number, endTime: number) =>
     ipcRenderer.invoke('cut-segment', startTime, endTime),
-  exportSegment: (segmentId: string) =>
-    ipcRenderer.invoke('export-segment', segmentId),
+  exportSegment: (data: {
+    startTime: number
+    endTime: number
+    sourceVideoPath: string
+    sourceVideoFileName: string
+    slowMotionSpeed: number
+  }) => ipcRenderer.invoke('export-segment', data),
   exportGroup: (groupId: string) =>
     ipcRenderer.invoke('export-group', groupId),
   saveProject: (projectData: unknown) =>
