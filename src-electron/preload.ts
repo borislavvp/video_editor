@@ -21,4 +21,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('write-cache', sourceVideoPath, data),
   readCache: (sourceVideoPath: string) =>
     ipcRenderer.invoke('read-cache', sourceVideoPath),
+  fileExists: (filePath: string) =>
+    ipcRenderer.invoke('file-exists', filePath),
 })

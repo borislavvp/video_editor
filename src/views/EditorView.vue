@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useProjectStore } from '../stores/project'
+import type { Segment, Group } from '../stores/project'
 import { usePlayerStore } from '../stores/player'
 import TimelineCanvas from '../components/TimelineCanvas.vue'
 
@@ -23,6 +24,12 @@ const dragOverSegment = ref<{ segmentId: string; position: 'before' | 'after' } 
 const dragOverGroup = ref<string | null>(null)
 const exportingSegmentId = ref<string | null>(null)
 const exportError = ref<string | null>(null)
+const savingProject = ref(false)
+const saveProjectError = ref<string | null>(null)
+const loadingProject = ref(false)
+const loadProjectError = ref<string | null>(null)
+const showCacheRestorePrompt = ref(false)
+const cacheRestoreData = ref<Record<string, unknown> | null>(null)
 
 const FRAME_STEP = 1 / 30
 
@@ -374,6 +381,89 @@ async function exportSegment(segmentId: string) {
     setTimeout(() => { exportError.value = null }, 5000)
   }
 }
+
+async function saveProject() {
+  if (!projectStore.hasVideo || !projectStore.sourceVideoPath) return
+
+  savingProject.value = true
+  saveProjectError.value = null
+
+  const projectName = projectStore.sourceVideoFileName
+    ? projectStore.sourceVideoFileName.replace(/\.[^.]+$/, '')
+    : 'handball-project'
+
+  const result = await window.electronAPI.saveProject({
+    version: '1',
+    sourceVideoPath: projectStore.sourceVideoPath,
+    sourceVideoFileName: projectStore.sourceVideoFileName,
+    segments: JSON.parse(JSON.stringify(projectStore.segments)),
+    groups: JSON.parse(JSON.stringify(projectStore.groups)),
+    projectName,
+  })
+
+  savingProject.value = false
+
+  if (!result.success) {
+    saveProjectError.value = result.error ?? 'Failed to save project'
+    setTimeout(() => { saveProjectError.value = null }, 8000)
+  }
+}
+
+async function loadProject() {
+  loadingProject.value = true
+  loadProjectError.value = null
+
+  const result = await window.electronAPI.loadProject()
+
+  if (!result.success) {
+    loadingProject.value = false
+    if (result.error !== 'Load canceled') {
+      loadProjectError.value = result.error ?? 'Failed to load project'
+      setTimeout(() => { loadProjectError.value = null }, 8000)
+    }
+    return
+  }
+
+  const project = result.project as unknown as Record<string, unknown>
+  const srcPath = project.sourceVideoPath as string | undefined
+
+  player.reset()
+
+  if (srcPath && await window.electronAPI.fileExists(srcPath)) {
+    projectStore.sourceVideoPath = srcPath as string
+    const parts = (srcPath as string).replace(/\\/g, '/').split('/')
+    projectStore.sourceVideoFileName = parts[parts.length - 1] ?? (srcPath as string)
+    if (videoRef.value) {
+      videoRef.value.src = `file://${srcPath}`
+    }
+    projectStore.restoreState({
+      segments: project.segments as Segment[] | undefined,
+      groups: project.groups as Group[] | undefined,
+      inMarker: null,
+      outMarker: null,
+    })
+  } else {
+    projectStore.restoreState({
+      segments: project.segments as Segment[] | undefined,
+      groups: project.groups as Group[] | undefined,
+      inMarker: null,
+      outMarker: null,
+    })
+
+    const fileResult = await window.electronAPI.openVideo()
+    if (!fileResult.canceled && fileResult.filePath) {
+      projectStore.sourceVideoPath = fileResult.filePath
+      const parts = fileResult.filePath.replace(/\\/g, '/').split('/')
+      projectStore.sourceVideoFileName = parts[parts.length - 1] ?? fileResult.filePath
+      if (videoRef.value) {
+        videoRef.value.src = `file://${fileResult.filePath}`
+      }
+    }
+  }
+
+  loadingProject.value = false
+}
+
 function onVideoLoaded() {
   const v = videoRef.value
   if (!v) return
@@ -507,7 +597,21 @@ async function restoreCache() {
   if (!projectStore.sourceVideoPath) return
   const result = await window.electronAPI.readCache(projectStore.sourceVideoPath)
   if (!result.success || !result.data) return
-  projectStore.restoreState(result.data as Record<string, unknown>)
+
+  cacheRestoreData.value = result.data as Record<string, unknown>
+  showCacheRestorePrompt.value = true
+}
+
+function confirmRestoreCache() {
+  if (cacheRestoreData.value) {
+    projectStore.restoreState(cacheRestoreData.value)
+  }
+  dismissRestoreCache()
+}
+
+function dismissRestoreCache() {
+  showCacheRestorePrompt.value = false
+  cacheRestoreData.value = null
 }
 
 onMounted(() => {
@@ -548,12 +652,75 @@ onUnmounted(() => {
       >
         Open Video
       </button>
+      <button
+        v-if="projectStore.hasVideo"
+        class="px-4 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm rounded-md transition-colors ml-2"
+        :disabled="savingProject"
+        @click="saveProject"
+      >
+        <span v-if="savingProject" class="inline-flex items-center gap-1">
+          <svg class="w-3.5 h-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          Saving...
+        </span>
+        <span v-else>Save Project</span>
+      </button>
+      <button
+        class="px-4 py-1.5 bg-gray-600 hover:bg-gray-500 text-white text-sm rounded-md transition-colors ml-2"
+        :disabled="loadingProject"
+        @click="loadProject"
+      >
+        <span v-if="loadingProject" class="inline-flex items-center gap-1">
+          <svg class="w-3.5 h-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          Loading...
+        </span>
+        <span v-else>Load Project</span>
+      </button>
       <span
         v-if="projectStore.sourceVideoFileName"
         class="ml-4 text-sm text-gray-400 truncate max-w-md"
       >
         {{ projectStore.sourceVideoFileName }}
       </span>
+      <span
+        v-if="saveProjectError"
+        class="ml-4 text-xs text-red-400 truncate"
+      >
+        {{ saveProjectError }}
+      </span>
+      <span
+        v-if="loadProjectError"
+        class="ml-4 text-xs text-red-400 truncate"
+      >
+        {{ loadProjectError }}
+      </span>
+    </div>
+
+    <!-- Cache restore prompt -->
+    <div
+      v-if="showCacheRestorePrompt"
+      class="bg-yellow-500/10 border-b border-yellow-500/30 px-4 py-2 flex items-center gap-3 flex-shrink-0"
+    >
+      <p class="text-sm text-yellow-400 flex-1">
+        Found auto-recovery data for this video. Restore previous session?
+      </p>
+      <button
+        class="px-3 py-1 bg-yellow-600 hover:bg-yellow-500 text-white text-xs rounded transition-colors"
+        @click="confirmRestoreCache"
+      >
+        Restore
+      </button>
+      <button
+        class="px-3 py-1 bg-gray-600 hover:bg-gray-500 text-white text-xs rounded transition-colors"
+        @click="dismissRestoreCache"
+      >
+        Dismiss
+      </button>
     </div>
 
     <!-- Main content area: Video + Sidebar -->
