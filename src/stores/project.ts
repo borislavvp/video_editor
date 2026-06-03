@@ -34,12 +34,16 @@ export const useProjectStore = defineStore('project', () => {
   const inMarker = ref<number | null>(null)
   const outMarker = ref<number | null>(null)
   let segmentCounter = 0
+  let groupCounter = 0
 
   const hasVideo = computed(() => sourceVideoPath.value !== null)
   const hasInMarker = computed(() => inMarker.value !== null)
   const hasOutMarker = computed(() => outMarker.value !== null)
   const selectedSegment = computed(() =>
     segments.value.find((s) => s.id === selectedSegmentId.value) ?? null,
+  )
+  const sortedGroups = computed(() =>
+    [...groups.value].sort((a, b) => a.order - b.order),
   )
 
   function setSourceVideo(filePath: string) {
@@ -152,6 +156,120 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  function addGroup(): Group {
+    groupCounter++
+    const group: Group = {
+      id: `g${Date.now()}`,
+      title: `Group ${groupCounter}`,
+      comments: '',
+      order: groups.value.length,
+      visible: true,
+    }
+    groups.value.push(group)
+    return group
+  }
+
+  function updateGroup(
+    id: string,
+    updates: Partial<{ title: string; comments: string; visible: boolean }>,
+  ) {
+    const g = groups.value.find((g) => g.id === id)
+    if (g) {
+      if (updates.title !== undefined) g.title = updates.title
+      if (updates.comments !== undefined) g.comments = updates.comments
+      if (updates.visible !== undefined) g.visible = updates.visible
+    }
+  }
+
+  function removeGroup(id: string) {
+    groups.value = groups.value.filter((g) => g.id !== id)
+    for (const seg of segments.value) {
+      if (seg.groupId === id) {
+        seg.groupId = null
+      }
+    }
+  }
+
+  function reorderGroups(orderedIds: string[]) {
+    for (const g of groups.value) {
+      const idx = orderedIds.indexOf(g.id)
+      if (idx !== -1) {
+        g.order = idx
+      }
+    }
+  }
+
+  function setGroups(val: Group[]) {
+    groups.value = val
+  }
+
+  function assignSegmentToGroup(segmentId: string, groupId: string | null) {
+    const seg = segments.value.find((s) => s.id === segmentId)
+    if (!seg) return
+
+    if (seg.groupId !== groupId) {
+      seg.groupId = groupId
+      moveSegmentToEndOfGroup(segmentId, groupId)
+    }
+  }
+
+  function moveSegmentToEndOfGroup(segmentId: string, groupId: string | null) {
+    const idx = segments.value.findIndex((s) => s.id === segmentId)
+    if (idx === -1) return
+    const [seg] = segments.value.splice(idx, 1)
+    const lastIdx = findLastIndex(
+      segments.value,
+      (s) => s.groupId === groupId,
+    )
+    segments.value.splice(lastIdx + 1, 0, seg)
+  }
+
+  function moveSegment(
+    segmentId: string,
+    targetGroupId: string | null,
+    insertBeforeSegmentId: string | null,
+  ) {
+    const idx = segments.value.findIndex((s) => s.id === segmentId)
+    if (idx === -1) return
+
+    const seg = segments.value[idx]
+    seg.groupId = targetGroupId
+
+    const [removed] = segments.value.splice(idx, 1)
+
+    if (insertBeforeSegmentId) {
+      const targetIdx = segments.value.findIndex(
+        (s) => s.id === insertBeforeSegmentId,
+      )
+      if (targetIdx !== -1) {
+        segments.value.splice(targetIdx, 0, removed)
+        return
+      }
+    }
+
+    const lastIdx = findLastIndex(
+      segments.value,
+      (s) => s.groupId === targetGroupId,
+    )
+    segments.value.splice(lastIdx + 1, 0, removed)
+  }
+
+  function reorderSegmentWithinGroup(
+    segmentId: string,
+    insertBeforeSegmentId: string | null,
+  ) {
+    const seg = segments.value.find((s) => s.id === segmentId)
+    if (!seg) return
+    moveSegment(segmentId, seg.groupId, insertBeforeSegmentId)
+  }
+
+  function findLastIndex<T>(arr: T[], predicate: (item: T) => boolean): number {
+    for (let i = arr.length - 1; i >= 0; i--) {
+      if (predicate(arr[i])) return i
+    }
+    return -1
+  }
+
   function restoreState(state: {
     segments?: Segment[]
     groups?: Group[]
@@ -169,6 +287,7 @@ export const useProjectStore = defineStore('project', () => {
     }
     if (state.groups) {
       groups.value = state.groups
+      groupCounter = state.groups.length
     }
     if (state.inMarker !== undefined) {
       inMarker.value = state.inMarker
@@ -190,6 +309,7 @@ export const useProjectStore = defineStore('project', () => {
     hasInMarker,
     hasOutMarker,
     selectedSegment,
+    sortedGroups,
     setSourceVideo,
     setInMarker,
     setOutMarker,
@@ -204,5 +324,13 @@ export const useProjectStore = defineStore('project', () => {
     updateSegmentComments,
     updateSegmentSlowMotionSpeed,
     restoreState,
+    addGroup,
+    updateGroup,
+    removeGroup,
+    reorderGroups,
+    setGroups,
+    assignSegmentToGroup,
+    moveSegment,
+    reorderSegmentWithinGroup,
   }
 })
