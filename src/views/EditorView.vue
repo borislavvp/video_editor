@@ -10,6 +10,8 @@ const videoRef = ref<HTMLVideoElement | null>(null)
 const videoWidth = ref<number>(0)
 const videoHeight = ref<number>(0)
 const videoError = ref<string | null>(null)
+const exportingSegmentId = ref<string | null>(null)
+const exportError = ref<string | null>(null)
 
 const FRAME_STEP = 1 / 30
 
@@ -92,6 +94,29 @@ function markOut() {
 
 function deleteSelected() {
   projectStore.deleteSelectedSegment()
+}
+
+async function exportSegment(segmentId: string) {
+  const segment = projectStore.segments.find((s) => s.id === segmentId)
+  if (!segment || !projectStore.sourceVideoPath || !projectStore.sourceVideoFileName) return
+
+  exportingSegmentId.value = segmentId
+  exportError.value = null
+
+  const result = await window.electronAPI.exportSegment({
+    startTime: segment.startTime,
+    endTime: segment.endTime,
+    sourceVideoPath: projectStore.sourceVideoPath,
+    sourceVideoFileName: projectStore.sourceVideoFileName,
+    slowMotionSpeed: segment.slowMotionSpeed,
+  })
+
+  exportingSegmentId.value = null
+
+  if (!result.success) {
+    exportError.value = result.error ?? 'Export failed'
+    setTimeout(() => { exportError.value = null }, 5000)
+  }
 }
 
 function onVideoLoaded() {
@@ -403,18 +428,62 @@ onUnmounted(() => {
               Press <kbd class="text-gray-400 bg-gray-700 px-1 rounded text-xs">I</kbd> then <kbd class="text-gray-400 bg-gray-700 px-1 rounded text-xs">O</kbd> to mark segments
             </p>
           </div>
-          <div v-else class="divide-y divide-gray-700/50">
+          <div v-if="exportError" class="px-4 py-2 bg-red-500/10 border-b border-red-500/20">
+            <p class="text-xs text-red-400">{{ exportError }}</p>
+          </div>
+          <div class="divide-y divide-gray-700/50">
             <div
               v-for="segment in projectStore.segments"
               :key="segment.id"
-              class="px-4 py-3 cursor-pointer transition-colors"
+              class="px-4 py-3 transition-colors group"
               :class="segment.id === projectStore.selectedSegmentId ? 'bg-gray-700/80' : 'hover:bg-gray-700/40'"
-              @click="seekTo(segment.startTime); projectStore.selectSegment(segment.id)"
             >
-              <p class="text-sm text-gray-300 font-medium truncate">{{ segment.title }}</p>
-              <p class="text-xs text-gray-500 font-mono mt-0.5">
-                {{ formatTime(segment.startTime) }} - {{ formatTime(segment.endTime) }}
-              </p>
+              <div class="flex items-start gap-2">
+                <div
+                  class="flex-1 min-w-0 cursor-pointer"
+                  @click="seekTo(segment.startTime); projectStore.selectSegment(segment.id)"
+                >
+                  <p class="text-sm text-gray-300 font-medium truncate">{{ segment.title }}</p>
+                  <p class="text-xs text-gray-500 font-mono mt-0.5">
+                    {{ formatTime(segment.startTime) }} - {{ formatTime(segment.endTime) }}
+                  </p>
+                </div>
+                <button
+                  class="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-gray-600 text-gray-500 hover:text-blue-400 transition-colors opacity-0 group-hover:opacity-100"
+                  :class="{ 'opacity-100': exportingSegmentId === segment.id }"
+                  :disabled="exportingSegmentId !== null"
+                  @click.stop="exportSegment(segment.id)"
+                  title="Export Segment"
+                >
+                  <!-- Spinner when exporting -->
+                  <svg
+                    v-if="exportingSegmentId === segment.id"
+                    class="w-4 h-4 animate-spin text-blue-400"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  <!-- Export icon -->
+                  <svg
+                    v-else
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    class="w-4 h-4"
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
         </div>

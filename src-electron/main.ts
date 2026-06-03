@@ -1,6 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
+import { spawn } from 'node:child_process'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg') as { path: string }
+const ffmpegPath = ffmpegInstaller.path
 
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mkv', 'mov']
 
@@ -56,8 +62,90 @@ ipcMain.handle('cut-segment', async (_event, _startTime: number, _endTime: numbe
   return { success: false, outputPath: null }
 })
 
-ipcMain.handle('export-segment', async (_event, _segmentId: string) => {
-  return { success: false, outputPath: null }
+interface ExportSegmentData {
+  startTime: number
+  endTime: number
+  sourceVideoPath: string
+  sourceVideoFileName: string
+  slowMotionSpeed: number
+}
+
+ipcMain.handle('export-segment', async (_event, data: ExportSegmentData) => {
+  if (!mainWindow) {
+    return { success: false, outputPath: null, error: 'No application window' }
+  }
+
+  const ext = path.extname(data.sourceVideoFileName) || '.mp4'
+  const baseName = path.basename(data.sourceVideoFileName, ext)
+  const defaultName = `${baseName}_segment_${data.startTime.toFixed(1)}-${data.endTime.toFixed(1)}.mp4`
+
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export Segment',
+    defaultPath: defaultName,
+    filters: [
+      { name: 'MP4 Video', extensions: ['mp4'] },
+    ],
+  })
+
+  if (result.canceled || !result.filePath) {
+    return { success: false, outputPath: null, error: 'Export canceled' }
+  }
+
+  const outputPath = result.filePath
+
+  return new Promise((resolve) => {
+    let args: string[]
+
+    if (data.slowMotionSpeed < 1 && data.slowMotionSpeed > 0) {
+      const setpts = (1 / data.slowMotionSpeed).toFixed(4)
+      args = [
+        '-ss', String(data.startTime),
+        '-to', String(data.endTime),
+        '-i', data.sourceVideoPath,
+        '-filter:v', `setpts=${setpts}*PTS`,
+        '-filter:a', `atempo=${data.slowMotionSpeed.toFixed(4)}`,
+        '-y',
+        outputPath,
+      ]
+    } else {
+      args = [
+        '-ss', String(data.startTime),
+        '-to', String(data.endTime),
+        '-i', data.sourceVideoPath,
+        '-c', 'copy',
+        '-y',
+        outputPath,
+      ]
+    }
+
+    const proc = spawn(ffmpegPath, args)
+
+    let stderr = ''
+
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString()
+    })
+
+    proc.on('close', (code: number | null) => {
+      if (code === 0) {
+        resolve({ success: true, outputPath, error: null })
+      } else {
+        resolve({
+          success: false,
+          outputPath: null,
+          error: `ffmpeg exited with code ${code}: ${stderr.slice(-500)}`,
+        })
+      }
+    })
+
+    proc.on('error', (err: Error) => {
+      resolve({
+        success: false,
+        outputPath: null,
+        error: `Failed to run ffmpeg: ${err.message}`,
+      })
+    })
+  })
 })
 
 ipcMain.handle('export-group', async (_event, _groupId: string) => {
@@ -73,7 +161,7 @@ ipcMain.handle('load-project', async () => {
 })
 
 ipcMain.handle('get-ffmpeg-path', async () => {
-  return { path: null }
+  return { path: ffmpegPath }
 })
 
 function getCachePath(sourceVideoPath: string): string {
