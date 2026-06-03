@@ -1,7 +1,7 @@
 {
   "name": "video_editor",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -36,5 +36,41 @@
     "vite-plugin-electron": "^1.0.1",
     "vite-plugin-electron-renderer": "^1.0.0",
     "vue-tsc": "^3.2.8"
+  },
+  "description": "Desktop video analysis tool for handball matches. Works completely offline.",
+  "author": "Handball Analyzer Team",
+  "build": {
+    "appId": "com.handball.analyzer",
+    "productName": "Handball Analyzer",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/@ffmpeg-installer/**/*"
+    ],
+    "publish": null,
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "build/icon.png",
+      "category": "public.app-category.sports"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "build/icon.png",
+      "category": "Video"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

@@ -5,9 +5,50 @@ import os from 'node:os'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 
-const require = createRequire(import.meta.url)
-const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg') as { path: string }
-const ffmpegPath = ffmpegInstaller.path
+function resolveFfmpegPath(): string {
+  const platform = `${os.platform()}-${os.arch()}`
+  const binary = os.platform() === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
+
+  if (app.isPackaged) {
+    const unpackedPath = path.join(
+      process.resourcesPath,
+      'app.asar.unpacked',
+      'node_modules',
+      '@ffmpeg-installer',
+      platform,
+      binary,
+    )
+    if (fs.existsSync(unpackedPath)) {
+      return unpackedPath
+    }
+  }
+
+  try {
+    const require = createRequire(import.meta.url)
+    const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg') as {
+      path: string
+    }
+    if (ffmpegInstaller.path) {
+      return ffmpegInstaller.path
+    }
+  } catch {
+    // continue to fallback
+  }
+
+  const devPath = path.resolve(
+    'node_modules',
+    '@ffmpeg-installer',
+    platform,
+    binary,
+  )
+  if (fs.existsSync(devPath)) return devPath
+
+  throw new Error(
+    `Could not find ffmpeg executable for ${platform}`,
+  )
+}
+
+const ffmpegPath = resolveFfmpegPath()
 
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mkv', 'mov']
 
