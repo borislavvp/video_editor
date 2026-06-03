@@ -290,7 +290,8 @@ ipcMain.handle('save-project', async (_event, projectData: SaveProjectData) => {
 
   for (const segment of projectData.segments) {
     const folderPath = groupFolders.get(segment.groupId) ?? ungroupedFolder
-    const segName = sanitizeFilename(segment.title) || `segment_${segment.id}`
+    const baseName = sanitizeFilename(segment.title) || `segment_${segment.id}`
+    const segName = `${baseName}_${segment.startTime.toFixed(1)}-${segment.endTime.toFixed(1)}`
     const outputPath = path.join(folderPath, `${segName}.mp4`)
 
     const exportResult = await runFfmpegExport(
@@ -312,6 +313,7 @@ ipcMain.handle('save-project', async (_event, projectData: SaveProjectData) => {
 
   const projectJson: Record<string, unknown> = {
     version: projectData.version,
+    projectName: projectData.projectName,
     sourceVideoPath: projectData.sourceVideoPath,
     sourceVideoFileName: projectData.sourceVideoFileName,
     createdAt: new Date().toISOString(),
