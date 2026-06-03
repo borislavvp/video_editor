@@ -22,6 +22,7 @@ const dragState = ref<{ type: 'segment'; segmentId: string } | { type: 'group'; 
 const dragOverSegment = ref<{ segmentId: string; position: 'before' | 'after' } | null>(null)
 const dragOverGroup = ref<string | null>(null)
 const exportingSegmentId = ref<string | null>(null)
+const exportingGroupId = ref<string | null>(null)
 const exportError = ref<string | null>(null)
 
 const FRAME_STEP = 1 / 30
@@ -374,6 +375,38 @@ async function exportSegment(segmentId: string) {
     setTimeout(() => { exportError.value = null }, 5000)
   }
 }
+
+async function exportGroup(groupId: string) {
+  const group = projectStore.groups.find((g) => g.id === groupId)
+  if (!group || !projectStore.sourceVideoPath || !projectStore.sourceVideoFileName) return
+
+  const groupSegments = getGroupSegments(groupId)
+  if (groupSegments.length === 0) return
+
+  exportingGroupId.value = groupId
+  exportError.value = null
+
+  const result = await window.electronAPI.exportGroup({
+    sourceVideoPath: projectStore.sourceVideoPath,
+    sourceVideoFileName: projectStore.sourceVideoFileName,
+    segments: groupSegments.map((s) => ({
+      id: s.id,
+      title: s.title,
+      startTime: s.startTime,
+      endTime: s.endTime,
+      slowMotionSpeed: s.slowMotionSpeed,
+    })),
+    groupTitle: group.title,
+  })
+
+  exportingGroupId.value = null
+
+  if (!result.success) {
+    exportError.value = result.error ?? 'Export failed'
+    setTimeout(() => { exportError.value = null }, 5000)
+  }
+}
+
 function onVideoLoaded() {
   const v = videoRef.value
   if (!v) return
@@ -763,7 +796,7 @@ onUnmounted(() => {
                     <button
                       class="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-gray-600 text-gray-500 hover:text-blue-400 transition-colors opacity-0 group-hover:opacity-100"
                       :class="{ 'opacity-100': exportingSegmentId === segment.id }"
-                      :disabled="exportingSegmentId !== null"
+                      :disabled="exportingSegmentId !== null || exportingGroupId !== null"
                       @click.stop="exportSegment(segment.id)"
                       title="Export Segment"
                     >
@@ -906,6 +939,41 @@ onUnmounted(() => {
                       <path d="M10.748 13.93l2.523 2.523a9.987 9.987 0 01-3.27.547c-4.258 0-7.894-2.66-9.337-6.41a1.651 1.651 0 010-1.186A10.007 10.007 0 012.839 6.02L6.07 9.252a4 4 0 004.678 4.678z" />
                     </svg>
                   </button>
+
+                  <!-- Export group button -->
+                  <button
+                    class="text-gray-500 hover:text-blue-400 transition-colors shrink-0"
+                    :class="{ 'text-blue-400': exportingGroupId === group.id }"
+                    :disabled="exportingSegmentId !== null || exportingGroupId !== null"
+                    :title="'Export ' + group.title"
+                    @click.stop="exportGroup(group.id)"
+                  >
+                    <svg
+                      v-if="exportingGroupId === group.id"
+                      class="w-4 h-4 animate-spin"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <svg
+                      v-else
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      class="w-4 h-4"
+                    >
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                  </button>
                 </div>
 
                 <!-- Group segments (when expanded and visible) -->
@@ -958,7 +1026,7 @@ onUnmounted(() => {
                       <button
                         class="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-gray-600 text-gray-500 hover:text-blue-400 transition-colors opacity-0 group-hover:opacity-100"
                         :class="{ 'opacity-100': exportingSegmentId === segment.id }"
-                        :disabled="exportingSegmentId !== null"
+                        :disabled="exportingSegmentId !== null || exportingGroupId !== null"
                         @click.stop="exportSegment(segment.id)"
                         title="Export Segment"
                       >

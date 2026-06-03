@@ -12,11 +12,26 @@ export interface ExportResult {
   error: string | null
 }
 
+export interface ExportGroupSegmentData {
+  id: string
+  title: string
+  startTime: number
+  endTime: number
+  slowMotionSpeed: number
+}
+
+export interface ExportGroupData {
+  sourceVideoPath: string
+  sourceVideoFileName: string
+  segments: ExportGroupSegmentData[]
+  groupTitle: string
+}
+
 export interface ElectronAPI {
   openVideo: () => Promise<{ canceled: boolean; filePath: string | null }>
   cutSegment: (startTime: number, endTime: number) => Promise<{ success: boolean; outputPath: string | null }>
   exportSegment: (data: ExportSegmentData) => Promise<ExportResult>
-  exportGroup: (groupId: string) => Promise<{ success: boolean; outputPath: string | null }>
+  exportGroup: (data: ExportGroupData) => Promise<ExportResult>
   saveProject: (projectData: unknown) => Promise<{ success: boolean; path: string | null }>
   loadProject: () => Promise<{ success: boolean; project: unknown }>
   getFFmpegPath: () => Promise<{ path: string | null }>

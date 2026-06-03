@@ -11,8 +11,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     sourceVideoFileName: string
     slowMotionSpeed: number
   }) => ipcRenderer.invoke('export-segment', data),
-  exportGroup: (groupId: string) =>
-    ipcRenderer.invoke('export-group', groupId),
+  exportGroup: (data: {
+    sourceVideoPath: string
+    sourceVideoFileName: string
+    segments: { id: string; title: string; startTime: number; endTime: number; slowMotionSpeed: number }[]
+    groupTitle: string
+  }) => ipcRenderer.invoke('export-group', data),
   saveProject: (projectData: unknown) =>
     ipcRenderer.invoke('save-project', projectData),
   loadProject: () => ipcRenderer.invoke('load-project'),
