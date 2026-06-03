@@ -28,6 +28,7 @@ const savingProject = ref(false)
 const saveProjectError = ref<string | null>(null)
 const loadingProject = ref(false)
 const loadProjectError = ref<string | null>(null)
+const loadedProjectName = ref<string | null>(null)
 const showCacheRestorePrompt = ref(false)
 const cacheRestoreData = ref<Record<string, unknown> | null>(null)
 
@@ -103,6 +104,7 @@ function stopSlowMotion() {
 
 async function openVideo() {
   videoError.value = null
+  loadedProjectName.value = null
   const result = await window.electronAPI.openVideo()
   if (result.canceled || !result.filePath) return
 
@@ -388,9 +390,10 @@ async function saveProject() {
   savingProject.value = true
   saveProjectError.value = null
 
-  const projectName = projectStore.sourceVideoFileName
-    ? projectStore.sourceVideoFileName.replace(/\.[^.]+$/, '')
-    : 'handball-project'
+  const projectName = loadedProjectName.value
+    || (projectStore.sourceVideoFileName
+      ? projectStore.sourceVideoFileName.replace(/\.[^.]+$/, '')
+      : 'handball-project')
 
   const result = await window.electronAPI.saveProject({
     version: '1',
@@ -426,6 +429,8 @@ async function loadProject() {
 
   const project = result.project as unknown as Record<string, unknown>
   const srcPath = project.sourceVideoPath as string | undefined
+
+  loadedProjectName.value = (project.projectName as string) || null
 
   player.reset()
 
