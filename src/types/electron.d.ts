@@ -6,6 +6,8 @@ export interface ElectronAPI {
   saveProject: (projectData: unknown) => Promise<{ success: boolean; path: string | null }>
   loadProject: () => Promise<{ success: boolean; project: unknown }>
   getFFmpegPath: () => Promise<{ path: string | null }>
+  writeCache: (sourceVideoPath: string, data: unknown) => Promise<{ success: boolean }>
+  readCache: (sourceVideoPath: string) => Promise<{ success: boolean; data: unknown }>
 }
 
 declare global {

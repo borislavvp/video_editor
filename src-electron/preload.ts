@@ -12,4 +12,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('save-project', projectData),
   loadProject: () => ipcRenderer.invoke('load-project'),
   getFFmpegPath: () => ipcRenderer.invoke('get-ffmpeg-path'),
+  writeCache: (sourceVideoPath: string, data: unknown) =>
+    ipcRenderer.invoke('write-cache', sourceVideoPath, data),
+  readCache: (sourceVideoPath: string) =>
+    ipcRenderer.invoke('read-cache', sourceVideoPath),
 })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useProjectStore } from '../stores/project'
 import { usePlayerStore } from '../stores/player'
 
@@ -42,6 +42,13 @@ function frameStep(direction: -1 | 1) {
   player.updateTime(v.currentTime)
 }
 
+function seekTo(time: number) {
+  const v = videoRef.value
+  if (!v) return
+  v.currentTime = time
+  player.updateTime(time)
+}
+
 function startSlowMotion() {
   const v = videoRef.value
   if (!v) return
@@ -67,6 +74,24 @@ async function openVideo() {
   if (videoRef.value) {
     videoRef.value.src = `file://${result.filePath}`
   }
+
+  restoreCache()
+}
+
+function markIn() {
+  projectStore.setInMarker(player.currentTime)
+}
+
+function markOut() {
+  const t = player.currentTime
+  projectStore.setOutMarker(t)
+  if (projectStore.hasInMarker && projectStore.inMarker !== null) {
+    projectStore.addSegment(projectStore.inMarker, t)
+  }
+}
+
+function deleteSelected() {
+  projectStore.deleteSelectedSegment()
 }
 
 function onVideoLoaded() {
@@ -129,6 +154,20 @@ function handleKeyDown(e: KeyboardEvent) {
         startSlowMotion()
       }
       break
+    case 'KeyI':
+      e.preventDefault()
+      markIn()
+      break
+    case 'KeyO':
+      e.preventDefault()
+      markOut()
+      break
+    case 'Backspace':
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
+        deleteSelected()
+      }
+      break
   }
 }
 
@@ -144,17 +183,51 @@ function handleKeyUp(e: KeyboardEvent) {
   }
 }
 
+let cacheTimer: ReturnType<typeof setTimeout> | null = null
+
+function saveCache() {
+  if (!projectStore.sourceVideoPath) return
+  const data = {
+    segments: projectStore.segments,
+    groups: projectStore.groups,
+    inMarker: projectStore.inMarker,
+    outMarker: projectStore.outMarker,
+  }
+  window.electronAPI.writeCache(projectStore.sourceVideoPath, data)
+}
+
+function debouncedSaveCache() {
+  if (cacheTimer) clearTimeout(cacheTimer)
+  cacheTimer = setTimeout(saveCache, 1000)
+}
+
+async function restoreCache() {
+  if (!projectStore.sourceVideoPath) return
+  const result = await window.electronAPI.readCache(projectStore.sourceVideoPath)
+  if (!result.success || !result.data) return
+  projectStore.restoreState(result.data as Record<string, unknown>)
+}
+
 onMounted(() => {
   if (projectStore.sourceVideoPath && videoRef.value) {
     videoRef.value.src = `file://${projectStore.sourceVideoPath}`
+    restoreCache()
   }
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('keyup', handleKeyUp)
+  watch(
+    [() => projectStore.segments, () => projectStore.inMarker, () => projectStore.outMarker],
+    () => {
+      debouncedSaveCache()
+    },
+    { deep: true },
+  )
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener('keyup', handleKeyUp)
+  if (cacheTimer) clearTimeout(cacheTimer)
 })
 </script>
 
@@ -236,6 +309,22 @@ onUnmounted(() => {
           <div class="flex-1" />
 
           <span
+            v-if="projectStore.hasInMarker"
+            class="text-xs font-mono px-2 py-0.5 rounded bg-green-500/20 text-green-400"
+            title="I marker set"
+          >
+            In: {{ formatTime(projectStore.inMarker!) }}
+          </span>
+
+          <span
+            v-if="projectStore.hasOutMarker"
+            class="text-xs font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-400"
+            title="O marker set"
+          >
+            Out: {{ formatTime(projectStore.outMarker!) }}
+          </span>
+
+          <span
             class="text-xs font-mono px-2 py-0.5 rounded"
             :class="player.slowMotionActive ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-700 text-gray-400'"
           >
@@ -245,7 +334,46 @@ onUnmounted(() => {
 
         <!-- Timeline (bottom) -->
         <div class="h-24 bg-gray-800 mx-2 mb-2 rounded-b-lg flex items-center justify-center">
-          <p class="text-gray-500 text-sm">Timeline</p>
+          <div v-if="projectStore.hasVideo && player.duration > 0" class="w-full h-full px-4 py-2">
+            <div class="relative w-full h-full">
+              <div class="absolute top-0 left-0 w-full h-1 bg-gray-700 rounded" />
+              <div
+                v-if="projectStore.hasInMarker"
+                class="absolute top-0 w-0.5 h-3 bg-green-400 rounded"
+                :style="{ left: (projectStore.inMarker! / player.duration) * 100 + '%' }"
+                title="In marker"
+              />
+              <div
+                v-if="projectStore.hasOutMarker"
+                class="absolute top-0 w-0.5 h-3 bg-red-400 rounded"
+                :style="{ left: (projectStore.outMarker! / player.duration) * 100 + '%' }"
+                title="Out marker"
+              />
+              <div
+                v-for="segment in projectStore.segments"
+                :key="segment.id"
+                class="absolute top-1 h-2 rounded cursor-pointer transition-colors"
+                :class="segment.id === projectStore.selectedSegmentId ? 'bg-blue-400' : 'bg-blue-500/60 hover:bg-blue-400'"
+                :style="{
+                  left: (segment.startTime / player.duration) * 100 + '%',
+                  width: Math.max(0.5, ((segment.endTime - segment.startTime) / player.duration) * 100) + '%',
+                }"
+                :title="segment.title"
+                @click="seekTo(segment.startTime); projectStore.selectSegment(segment.id)"
+              />
+              <div
+                v-if="projectStore.inMarker !== null || projectStore.outMarker !== null"
+                class="absolute top-1 h-2 rounded bg-yellow-400/50"
+                :style="{
+                  left: ((projectStore.inMarker ?? projectStore.outMarker!) / player.duration) * 100 + '%',
+                  width: projectStore.inMarker !== null && projectStore.outMarker !== null
+                    ? Math.max(0.5, ((projectStore.outMarker - projectStore.inMarker) / player.duration) * 100) + '%'
+                    : '0.5%',
+                }"
+              />
+            </div>
+          </div>
+          <p v-else class="text-gray-500 text-sm">Timeline</p>
         </div>
       </div>
 
@@ -263,12 +391,35 @@ onUnmounted(() => {
             No video loaded
           </p>
         </div>
-        <div class="p-4 border-t border-gray-700">
+
+        <!-- Segments -->
+        <div class="p-4 border-t border-gray-700 flex items-center justify-between">
           <p class="text-sm font-medium text-gray-400">Segments</p>
+          <span class="text-xs text-gray-500">{{ projectStore.segments.length }}</span>
         </div>
-        <div class="flex-1 flex items-center justify-center">
-          <p class="text-gray-500 text-sm">Sidebar</p>
+        <div class="flex-1 overflow-y-auto">
+          <div v-if="projectStore.segments.length === 0" class="flex items-center justify-center h-full">
+            <p class="text-gray-500 text-sm text-center px-4">
+              Press <kbd class="text-gray-400 bg-gray-700 px-1 rounded text-xs">I</kbd> then <kbd class="text-gray-400 bg-gray-700 px-1 rounded text-xs">O</kbd> to mark segments
+            </p>
+          </div>
+          <div v-else class="divide-y divide-gray-700/50">
+            <div
+              v-for="segment in projectStore.segments"
+              :key="segment.id"
+              class="px-4 py-3 cursor-pointer transition-colors"
+              :class="segment.id === projectStore.selectedSegmentId ? 'bg-gray-700/80' : 'hover:bg-gray-700/40'"
+              @click="seekTo(segment.startTime); projectStore.selectSegment(segment.id)"
+            >
+              <p class="text-sm text-gray-300 font-medium truncate">{{ segment.title }}</p>
+              <p class="text-xs text-gray-500 font-mono mt-0.5">
+                {{ formatTime(segment.startTime) }} - {{ formatTime(segment.endTime) }}
+              </p>
+            </div>
+          </div>
         </div>
+
+        <!-- Shortcuts -->
         <div class="border-t border-gray-700">
           <div class="p-4">
             <p class="text-sm font-medium text-gray-400">Shortcuts</p>
@@ -285,6 +436,18 @@ onUnmounted(() => {
             <div class="flex items-center gap-2 text-gray-400">
               <kbd class="inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1.5 rounded bg-gray-700 text-gray-300 font-mono text-[10px]">Hold S</kbd>
               <span>Slow motion 0.25x</span>
+            </div>
+            <div class="flex items-center gap-2 text-gray-400">
+              <kbd class="inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1.5 rounded bg-gray-700 text-gray-300 font-mono text-[10px]">I</kbd>
+              <span>Mark in point</span>
+            </div>
+            <div class="flex items-center gap-2 text-gray-400">
+              <kbd class="inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1.5 rounded bg-gray-700 text-gray-300 font-mono text-[10px]">O</kbd>
+              <span>Mark out &amp; create segment</span>
+            </div>
+            <div class="flex items-center gap-2 text-gray-400">
+              <kbd class="inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1.5 rounded bg-gray-700 text-gray-300 font-mono text-[10px]">Ctrl+Bksp</kbd>
+              <span>Delete selected segment</span>
             </div>
           </div>
         </div>

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import path from 'node:path'
+import fs from 'node:fs'
 
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mkv', 'mov']
 
@@ -73,6 +74,34 @@ ipcMain.handle('load-project', async () => {
 
 ipcMain.handle('get-ffmpeg-path', async () => {
   return { path: null }
+})
+
+function getCachePath(sourceVideoPath: string): string {
+  const dir = path.dirname(sourceVideoPath)
+  return path.join(dir, '.handball-cache.json')
+}
+
+ipcMain.handle('write-cache', async (_event, sourceVideoPath: string, data: unknown) => {
+  if (!sourceVideoPath) return { success: false }
+  try {
+    const cachePath = getCachePath(sourceVideoPath)
+    fs.writeFileSync(cachePath, JSON.stringify(data, null, 2), 'utf-8')
+    return { success: true }
+  } catch {
+    return { success: false }
+  }
+})
+
+ipcMain.handle('read-cache', async (_event, sourceVideoPath: string) => {
+  if (!sourceVideoPath) return { success: false, data: null }
+  try {
+    const cachePath = getCachePath(sourceVideoPath)
+    if (!fs.existsSync(cachePath)) return { success: false, data: null }
+    const raw = fs.readFileSync(cachePath, 'utf-8')
+    return { success: true, data: JSON.parse(raw) }
+  } catch {
+    return { success: false, data: null }
+  }
 })
 
 app.whenReady().then(() => {
