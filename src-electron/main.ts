@@ -1,5 +1,7 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import path from 'node:path'
+
+const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mkv', 'mov']
 
 let mainWindow: BrowserWindow | null = null
 
@@ -28,9 +30,25 @@ function createWindow() {
   })
 }
 
-// Placeholder IPC handlers
 ipcMain.handle('open-video', async () => {
-  return { canceled: true, filePath: null }
+  if (!mainWindow) {
+    return { canceled: true, filePath: null }
+  }
+
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Open Video File',
+    filters: [
+      { name: 'Video Files', extensions: VIDEO_EXTENSIONS },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+    properties: ['openFile'],
+  })
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { canceled: true, filePath: null }
+  }
+
+  return { canceled: false, filePath: result.filePaths[0] }
 })
 
 ipcMain.handle('cut-segment', async (_event, _startTime: number, _endTime: number) => {
