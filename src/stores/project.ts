@@ -105,6 +105,27 @@ export const useProjectStore = defineStore('project', () => {
     selectedSegmentId.value = id
   }
 
+  function updateSegmentTitle(id: string, title: string) {
+    const segment = segments.value.find((s) => s.id === id)
+    if (segment) {
+      segment.title = title
+    }
+  }
+
+  function updateSegmentComments(id: string, comments: string) {
+    const segment = segments.value.find((s) => s.id === id)
+    if (segment) {
+      segment.comments = comments
+    }
+  }
+
+  function updateSegmentSlowMotionSpeed(id: string, speed: number) {
+    const segment = segments.value.find((s) => s.id === id)
+    if (segment) {
+      segment.slowMotionSpeed = speed
+    }
+  }
+
   function restoreState(state: {
     segments?: Segment[]
     groups?: Group[]
@@ -151,6 +172,9 @@ export const useProjectStore = defineStore('project', () => {
     removeSegment,
     deleteSelectedSegment,
     selectSegment,
+    updateSegmentTitle,
+    updateSegmentComments,
+    updateSegmentSlowMotionSpeed,
     restoreState,
   }
 })
