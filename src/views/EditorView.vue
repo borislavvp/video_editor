@@ -9,6 +9,7 @@ const projectStore = useProjectStore()
 const player = usePlayerStore()
 
 const videoRef = ref<HTMLVideoElement | null>(null)
+const videoSrc = ref<string>('')
 const videoWidth = ref<number>(0)
 const videoHeight = ref<number>(0)
 const videoError = ref<string | null>(null)
@@ -34,6 +35,10 @@ const showCacheRestorePrompt = ref(false)
 const cacheRestoreData = ref<Record<string, unknown> | null>(null)
 
 const FRAME_STEP = 1 / 30
+
+function setVideoSource(filePath: string) {
+  videoSrc.value = `file://${filePath.replace(/\\/g, '/')}`
+}
 
 function formatTime(seconds: number): string {
   if (!isFinite(seconds) || seconds < 0) return '00:00.00'
@@ -111,10 +116,7 @@ async function openVideo() {
 
   player.reset()
   projectStore.setSourceVideo(result.filePath)
-
-  if (videoRef.value) {
-    videoRef.value.src = `file://${result.filePath}`
-  }
+  setVideoSource(result.filePath)
 
   restoreCache()
 }
@@ -439,15 +441,13 @@ async function loadProject() {
     projectStore.sourceVideoPath = srcPath as string
     const parts = (srcPath as string).replace(/\\/g, '/').split('/')
     projectStore.sourceVideoFileName = parts[parts.length - 1] ?? (srcPath as string)
-    if (videoRef.value) {
-      videoRef.value.src = `file://${srcPath}`
-    }
     projectStore.restoreState({
       segments: project.segments as Segment[] | undefined,
       groups: project.groups as Group[] | undefined,
       inMarker: null,
       outMarker: null,
     })
+    setVideoSource(srcPath)
   } else {
     projectStore.restoreState({
       segments: project.segments as Segment[] | undefined,
@@ -461,9 +461,7 @@ async function loadProject() {
       projectStore.sourceVideoPath = fileResult.filePath
       const parts = fileResult.filePath.replace(/\\/g, '/').split('/')
       projectStore.sourceVideoFileName = parts[parts.length - 1] ?? fileResult.filePath
-      if (videoRef.value) {
-        videoRef.value.src = `file://${fileResult.filePath}`
-      }
+      setVideoSource(fileResult.filePath)
     }
   }
 
@@ -651,10 +649,6 @@ function dismissRestoreCache() {
 }
 
 onMounted(() => {
-  if (projectStore.sourceVideoPath && videoRef.value) {
-    videoRef.value.src = `file://${projectStore.sourceVideoPath}`
-    restoreCache()
-  }
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('keyup', handleKeyUp)
   watch(
@@ -767,6 +761,7 @@ onUnmounted(() => {
           <video
             v-if="projectStore.hasVideo"
             ref="videoRef"
+            :src="videoSrc"
             class="max-w-full max-h-full"
             preload="metadata"
             @loadedmetadata="onVideoLoaded"

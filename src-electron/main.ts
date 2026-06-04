@@ -4,6 +4,11 @@ import fs from 'node:fs'
 import os from 'node:os'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'url'
+
+const __filename = fileURLToPath(import.meta.url)
+
+const __dirname = path.dirname(__filename)
 
 function resolveFfmpegPath(): string {
   const platform = `${os.platform()}-${os.arch()}`
@@ -65,6 +70,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      webSecurity: false,
     },
   })
 
