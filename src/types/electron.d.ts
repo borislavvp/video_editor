@@ -4,6 +4,7 @@ export interface ExportSegmentData {
   sourceVideoPath: string
   sourceVideoFileName: string
   slowMotionSpeed: number
+  title: string
 }
 
 export interface ExportResult {

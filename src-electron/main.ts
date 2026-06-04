@@ -116,6 +116,7 @@ interface ExportSegmentData {
   sourceVideoPath: string
   sourceVideoFileName: string
   slowMotionSpeed: number
+  title: string
 }
 
 ipcMain.handle('export-segment', async (_event, data: ExportSegmentData) => {
@@ -144,18 +145,10 @@ ipcMain.handle('export-segment', async (_event, data: ExportSegmentData) => {
   return new Promise((resolve) => {
     let args: string[]
 
-    if (data.slowMotionSpeed < 1 && data.slowMotionSpeed > 0) {
-      const setpts = (1 / data.slowMotionSpeed).toFixed(4)
-      args = [
-        '-ss', String(data.startTime),
-        '-to', String(data.endTime),
-        '-i', data.sourceVideoPath,
-        '-filter:v', `setpts=${setpts}*PTS`,
-        '-filter:a', `atempo=${data.slowMotionSpeed.toFixed(4)}`,
-        '-y',
-        outputPath,
-      ]
-    } else {
+    const needsSlowMo = data.slowMotionSpeed < 1 && data.slowMotionSpeed > 0
+    const hasTitle = !!data.title
+
+    if (!needsSlowMo && !hasTitle) {
       args = [
         '-ss', String(data.startTime),
         '-to', String(data.endTime),
@@ -164,6 +157,38 @@ ipcMain.handle('export-segment', async (_event, data: ExportSegmentData) => {
         '-y',
         outputPath,
       ]
+    } else {
+      const vfParts: string[] = []
+
+      if (needsSlowMo) {
+        const setpts = (1 / data.slowMotionSpeed).toFixed(4)
+        vfParts.push(`setpts=${setpts}*PTS`)
+      }
+
+      if (hasTitle) {
+        const escaped = escapeDrawtext(data.title)
+        vfParts.push(
+          `drawtext=text='${escaped}':fontsize=24:fontcolor=white:bordercolor=black:borderw=2:x=10:y=h-th-10:enable='between(t,0,3)'`,
+        )
+      }
+
+      args = [
+        '-ss', String(data.startTime),
+        '-to', String(data.endTime),
+        '-i', data.sourceVideoPath,
+        '-filter:v', vfParts.join(','),
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+      ]
+
+      if (needsSlowMo) {
+        args.push('-filter:a', `atempo=${data.slowMotionSpeed.toFixed(4)}`)
+        args.push('-c:a', 'aac')
+      } else {
+        args.push('-c:a', 'copy')
+      }
+
+      args.push('-y', outputPath)
     }
 
     const proc = spawn(ffmpegPath, args)

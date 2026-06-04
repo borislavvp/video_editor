@@ -31,6 +31,7 @@ export const useProjectStore = defineStore('project', () => {
   const groups = ref<Group[]>([])
   const segments = ref<Segment[]>([])
   const selectedSegmentId = ref<string | null>(null)
+  const selectedSegmentIds = ref<Set<string>>(new Set())
   const inMarker = ref<number | null>(null)
   const outMarker = ref<number | null>(null)
   let segmentCounter = 0
@@ -107,6 +108,21 @@ export const useProjectStore = defineStore('project', () => {
 
   function selectSegment(id: string | null) {
     selectedSegmentId.value = id
+  }
+
+  function toggleSegmentMultiSelect(id: string) {
+    const set = selectedSegmentIds.value
+    const newSet = new Set(set)
+    if (newSet.has(id)) {
+      newSet.delete(id)
+    } else {
+      newSet.add(id)
+    }
+    selectedSegmentIds.value = newSet
+  }
+
+  function clearMultiSelect() {
+    selectedSegmentIds.value = new Set()
   }
 
   function updateSegment(
@@ -309,6 +325,7 @@ export const useProjectStore = defineStore('project', () => {
     hasInMarker,
     hasOutMarker,
     selectedSegment,
+    selectedSegmentIds,
     sortedGroups,
     setSourceVideo,
     setInMarker,
@@ -318,6 +335,8 @@ export const useProjectStore = defineStore('project', () => {
     removeSegment,
     deleteSelectedSegment,
     selectSegment,
+    toggleSegmentMultiSelect,
+    clearMultiSelect,
     updateSegment,
     setSegments,
     updateSegmentTitle,

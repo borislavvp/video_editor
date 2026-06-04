@@ -153,6 +153,7 @@ function drawRuler(ctx: CanvasRenderingContext2D, w: number, _h: number) {
   ctx.textAlign = 'center'
 
   let tickTime = Math.ceil(visStart / interval) * interval
+  let lastLabelX = -100
 
   while (tickTime <= visEnd) {
     const x = timeToPixel(tickTime)
@@ -163,7 +164,10 @@ function drawRuler(ctx: CanvasRenderingContext2D, w: number, _h: number) {
       ctx.stroke()
 
       const label = formatTick(tickTime)
-      ctx.fillText(label, x, RULER_H - 6)
+      if (x - lastLabelX > 50) {
+        ctx.fillText(label, x, RULER_H - 6)
+        lastLabelX = x
+      }
     }
     tickTime += interval
   }

@@ -18,8 +18,11 @@ const editingTitleValue = ref('')
 const segmentSpeedApplied = ref(false)
 
 const collapsedGroups = ref<Set<string>>(new Set())
+const collapsedGroupComments = ref<Set<string>>(new Set())
+const collapsedSegmentInfo = ref<Set<string>>(new Set())
 const editingGroupTitleId = ref<string | null>(null)
 const editingGroupTitleValue = ref('')
+const sidebarWidth = ref(288)
 const dragState = ref<{ type: 'segment'; segmentId: string } | { type: 'group'; groupId: string } | null>(null)
 const dragOverSegment = ref<{ segmentId: string; position: 'before' | 'after' } | null>(null)
 const dragOverGroup = ref<string | null>(null)
@@ -142,7 +145,14 @@ function updateSegment(id: string, startTime: number, endTime: number) {
 }
 
 function createGroup() {
-  projectStore.addGroup()
+  const newGroup = projectStore.addGroup()
+  const selectedIds = projectStore.selectedSegmentIds
+  if (selectedIds.size > 0) {
+    for (const segId of selectedIds) {
+      projectStore.assignSegmentToGroup(segId, newGroup.id)
+    }
+    projectStore.clearMultiSelect()
+  }
 }
 
 function toggleCollapse(groupId: string) {
@@ -157,6 +167,81 @@ function toggleGroupVisibility(groupId: string) {
   const g = projectStore.groups.find((g) => g.id === groupId)
   if (g) {
     projectStore.updateGroup(groupId, { visible: !g.visible })
+  }
+}
+
+function toggleGroupComments(groupId: string) {
+  if (collapsedGroupComments.value.has(groupId)) {
+    collapsedGroupComments.value.delete(groupId)
+  } else {
+    collapsedGroupComments.value.add(groupId)
+  }
+}
+
+function toggleSegmentInfo(segmentId: string) {
+  if (collapsedSegmentInfo.value.has(segmentId)) {
+    collapsedSegmentInfo.value.delete(segmentId)
+  } else {
+    collapsedSegmentInfo.value.add(segmentId)
+  }
+}
+
+function seekToSegmentTime(segmentId: string) {
+  const seg = projectStore.segments.find((s) => s.id === segmentId)
+  if (seg) {
+    seekTo(seg.startTime)
+  }
+}
+
+function onVideoDrop(e: DragEvent) {
+  e.preventDefault()
+  const files = e.dataTransfer?.files
+  if (files && files.length > 0) {
+    const file = files[0]
+    const filePath = (file as unknown as { path?: string }).path
+    if (filePath) {
+      player.reset()
+      projectStore.setSourceVideo(filePath)
+      setVideoSource(filePath)
+      restoreCache()
+    }
+  }
+}
+
+function onVideoDragOver(e: DragEvent) {
+  e.preventDefault()
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+let resizeBarUnsub: (() => void) | null = null
+
+function startResizeSidebar(e: MouseEvent) {
+  e.preventDefault()
+  const startX = e.clientX
+  const startWidth = sidebarWidth.value
+
+  function onMouseMove(ev: MouseEvent) {
+    const delta = startX - ev.clientX
+    const newWidth = Math.max(200, Math.min(500, startWidth + delta))
+    sidebarWidth.value = newWidth
+  }
+
+  function onMouseUp() {
+    if (resizeBarUnsub) {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+      resizeBarUnsub = null
+    }
+  }
+
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+
+  if (resizeBarUnsub) {
+    window.removeEventListener('mousemove', onMouseMove)
+    window.removeEventListener('mouseup', onMouseUp)
   }
 }
 
@@ -377,13 +462,16 @@ async function exportSegment(segmentId: string) {
     sourceVideoPath: projectStore.sourceVideoPath,
     sourceVideoFileName: projectStore.sourceVideoFileName,
     slowMotionSpeed: segment.slowMotionSpeed,
+    title: segment.title,
   })
 
   exportingSegmentId.value = null
 
   if (!result.success) {
-    exportError.value = result.error ?? 'Export failed'
-    setTimeout(() => { exportError.value = null }, 5000)
+    if (result.error && !result.error.toLowerCase().includes('cancel')) {
+      exportError.value = result.error ?? 'Export failed'
+      setTimeout(() => { exportError.value = null }, 5000)
+    }
   }
 }
 
@@ -410,8 +498,10 @@ async function saveProject() {
   savingProject.value = false
 
   if (!result.success) {
-    saveProjectError.value = result.error ?? 'Failed to save project'
-    setTimeout(() => { saveProjectError.value = null }, 8000)
+    if (result.error && !result.error.toLowerCase().includes('cancel')) {
+      saveProjectError.value = result.error ?? 'Failed to save project'
+      setTimeout(() => { saveProjectError.value = null }, 8000)
+    }
   }
 }
 
@@ -423,7 +513,7 @@ async function loadProject() {
 
   if (!result.success) {
     loadingProject.value = false
-    if (result.error !== 'Load canceled') {
+    if (result.error && result.error !== 'Load canceled') {
       loadProjectError.value = result.error ?? 'Failed to load project'
       setTimeout(() => { loadProjectError.value = null }, 8000)
     }
@@ -494,10 +584,13 @@ async function exportGroup(groupId: string) {
   exportingGroupId.value = null
 
   if (!result.success) {
-    exportError.value = result.error ?? 'Export failed'
-    setTimeout(() => { exportError.value = null }, 5000)
+    if (result.error && !result.error.toLowerCase().includes('cancel')) {
+      exportError.value = result.error ?? 'Export failed'
+      setTimeout(() => { exportError.value = null }, 5000)
+    }
   }
 }
+
 function onVideoLoaded() {
   const v = videoRef.value
   if (!v) return
@@ -712,12 +805,6 @@ onUnmounted(() => {
         <span v-else>Load Project</span>
       </button>
       <span
-        v-if="projectStore.sourceVideoFileName"
-        class="ml-4 text-sm text-gray-400 truncate max-w-md"
-      >
-        {{ projectStore.sourceVideoFileName }}
-      </span>
-      <span
         v-if="saveProjectError"
         class="ml-4 text-xs text-red-400 truncate"
       >
@@ -756,8 +843,20 @@ onUnmounted(() => {
     <!-- Main content area: Video + Sidebar -->
     <div class="flex flex-1 overflow-hidden">
       <!-- Video area (left/main) -->
-      <div class="flex-1 flex flex-col">
-        <div class="flex-1 bg-black flex items-center justify-center mx-2 mt-2 rounded-t-lg relative overflow-hidden">
+      <div class="flex-1 flex flex-col" :style="{ minWidth: '200px' }">
+        <!-- Video filename bar -->
+        <div
+          v-if="projectStore.sourceVideoFileName"
+          class="h-6 bg-gray-850 mx-2 mt-2 rounded-t-lg flex items-center px-3"
+        >
+          <span class="text-[11px] text-gray-500 truncate">{{ projectStore.sourceVideoFileName }}</span>
+        </div>
+        <div
+          class="flex-1 bg-black flex items-center justify-center mx-2 relative overflow-hidden"
+          :class="projectStore.sourceVideoFileName ? 'rounded-t-none mt-0' : 'rounded-t-lg mt-2'"
+          @drop.prevent="onVideoDrop"
+          @dragover.prevent="onVideoDragOver"
+        >
           <video
             v-if="projectStore.hasVideo"
             ref="videoRef"
@@ -773,9 +872,10 @@ onUnmounted(() => {
           />
           <p
             v-if="!projectStore.hasVideo"
-            class="text-gray-500 text-lg"
+            class="text-gray-500 text-lg text-center"
           >
-            Open a video file to begin
+            Open a video file to begin<br />
+            <span class="text-sm">or drag &amp; drop a video file here</span>
           </p>
           <p
             v-if="videoError"
@@ -859,21 +959,14 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Sidebar (right) -->
-      <div class="w-72 bg-gray-800 m-2 ml-0 rounded-lg flex flex-col overflow-y-auto">
-        <div class="p-4 border-b border-gray-700">
-          <p class="text-sm font-medium text-gray-400">Video Info</p>
-        </div>
-        <div class="p-4">
-          <div v-if="projectStore.hasVideo && player.duration > 0" class="space-y-2 text-sm text-gray-400">
-            <p>Duration: {{ formatTime(player.duration) }}</p>
-            <p>Resolution: {{ videoWidth }}x{{ videoHeight }}</p>
-          </div>
-          <p v-else-if="!projectStore.hasVideo" class="text-sm text-gray-500">
-            No video loaded
-          </p>
-        </div>
+      <!-- Resizer -->
+      <div
+        class="w-1 cursor-col-resize hover:bg-blue-500 transition-colors flex-shrink-0 bg-gray-700"
+        @mousedown="startResizeSidebar"
+      />
 
+      <!-- Sidebar (right) -->
+      <div class="bg-gray-800 m-2 ml-0 rounded-lg flex flex-col overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" :style="{ width: sidebarWidth + 'px', minWidth: '200px', maxWidth: '500px' }">
         <!-- Segments header -->
         <div class="p-4 border-t border-gray-700 flex items-center justify-between">
           <p class="text-sm font-medium text-gray-400">Segments</p>
@@ -919,10 +1012,12 @@ onUnmounted(() => {
                   class="px-4 py-3 cursor-pointer transition-colors relative group"
                   :class="[
                     segment.id === projectStore.selectedSegmentId ? 'bg-gray-700/80' : 'hover:bg-gray-700/40',
+                    projectStore.selectedSegmentIds.has(segment.id) ? 'bg-blue-500/10 ring-1 ring-blue-500/20' : '',
                     dragState?.type === 'segment' && dragState.segmentId === segment.id ? 'opacity-40' : '',
                   ]"
                   draggable="true"
-                  @click="seekTo(segment.startTime); projectStore.selectSegment(segment.id)"
+                  @click="(e: MouseEvent) => { if (e.ctrlKey || e.metaKey) { projectStore.toggleSegmentMultiSelect(segment.id); } else { projectStore.clearMultiSelect(); seekTo(segment.startTime); projectStore.selectSegment(segment.id); } }"
+                  @dblclick.stop="seekToSegmentTime(segment.id)"
                   @dragstart="onSegmentDragStart($event, segment.id)"
                   @dragend="onSegmentDragEnd"
                   @dragover="onSegmentDragOver($event, segment.id)"
@@ -932,9 +1027,23 @@ onUnmounted(() => {
                   <div v-if="dragOverSegment?.segmentId === segment.id && dragOverSegment.position === 'before'" class="absolute top-0 left-2 right-2 h-0.5 bg-blue-500 rounded" />
                   <div class="flex items-start gap-2">
                     <div class="flex-1 min-w-0">
+                      <!-- Drag handle -->
+                      <div
+                        class="cursor-grab active:cursor-grabbing w-3 h-full flex-shrink-0 absolute left-0 top-0 bottom-0 flex items-center justify-center opacity-0 group-hover:opacity-50 transition-opacity"
+                        @click.stop
+                      >
+                        <svg class="w-2.5 h-2.5 text-gray-400" viewBox="0 0 24 24" fill="currentColor">
+                          <circle cx="9" cy="5" r="1.5" />
+                          <circle cx="15" cy="5" r="1.5" />
+                          <circle cx="9" cy="12" r="1.5" />
+                          <circle cx="15" cy="12" r="1.5" />
+                          <circle cx="9" cy="19" r="1.5" />
+                          <circle cx="15" cy="19" r="1.5" />
+                        </svg>
+                      </div>
                       <div
                         v-if="editingTitleId !== segment.id"
-                        class="text-sm text-gray-300 font-medium truncate cursor-text hover:text-white"
+                        class="pl-1 text-sm text-gray-300 font-medium truncate cursor-text hover:text-white"
                         @click.stop="startEditingTitle(segment.id); projectStore.selectSegment(segment.id)"
                       >
                         {{ segment.title }}
@@ -995,28 +1104,45 @@ onUnmounted(() => {
 
                   <div
                     v-if="segment.id === projectStore.selectedSegmentId"
-                    class="mt-2 space-y-2"
+                    class="mt-2"
                     @click.stop
                   >
-                    <textarea
-                      :value="segment.comments"
-                      class="w-full bg-gray-700 text-gray-200 text-xs rounded px-2 py-1.5 h-16 resize-y border border-gray-600 focus:border-blue-500 focus:outline-none placeholder-gray-500"
-                      placeholder="Add tactical notes..."
-                      @input="projectStore.updateSegmentComments(segment.id, ($event.target as HTMLTextAreaElement).value)"
-                    />
-
-                    <div class="flex items-center gap-2">
-                      <label class="text-xs text-gray-500 shrink-0">Speed:</label>
-                      <select
-                        :value="segment.slowMotionSpeed"
-                        class="flex-1 bg-gray-700 text-gray-200 text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500 focus:outline-none"
-                        @change="projectStore.updateSegmentSlowMotionSpeed(segment.id, Number(($event.target as HTMLSelectElement).value))"
+                    <button
+                      class="flex items-center gap-1 text-[10px] text-gray-500 hover:text-gray-300 transition-colors mb-1"
+                      @click.stop="toggleSegmentInfo(segment.id)"
+                    >
+                      <svg
+                        class="w-3 h-3 transition-transform"
+                        :class="collapsedSegmentInfo.has(segment.id) ? '' : 'rotate-90'"
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
                       >
-                        <option :value="1">1x (Normal)</option>
-                        <option :value="0.75">0.75x</option>
-                        <option :value="0.5">0.5x</option>
-                        <option :value="0.25">0.25x</option>
-                      </select>
+                        <path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd" />
+                      </svg>
+                      {{ collapsedSegmentInfo.has(segment.id) ? 'Show details' : 'Hide details' }}
+                    </button>
+                    <div v-if="!collapsedSegmentInfo.has(segment.id)" class="space-y-2">
+                      <textarea
+                        :value="segment.comments"
+                        class="w-full bg-gray-700 text-gray-200 text-xs rounded px-2 py-1.5 h-16 resize-y border border-gray-600 focus:border-blue-500 focus:outline-none placeholder-gray-500"
+                        placeholder="Add tactical notes..."
+                        @input="projectStore.updateSegmentComments(segment.id, ($event.target as HTMLTextAreaElement).value)"
+                      />
+
+                      <div class="flex items-center gap-2">
+                        <label class="text-xs text-gray-500 shrink-0">Speed:</label>
+                        <select
+                          :value="segment.slowMotionSpeed"
+                          class="flex-1 bg-gray-700 text-gray-200 text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500 focus:outline-none"
+                          @change="projectStore.updateSegmentSlowMotionSpeed(segment.id, Number(($event.target as HTMLSelectElement).value))"
+                        >
+                          <option :value="1">1x (Normal)</option>
+                          <option :value="0.75">0.75x</option>
+                          <option :value="0.5">0.5x</option>
+                          <option :value="0.25">0.25x</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
                   <div v-if="dragOverSegment?.segmentId === segment.id && dragOverSegment.position === 'after'" class="absolute bottom-0 left-2 right-2 h-0.5 bg-blue-500 rounded" />
@@ -1152,7 +1278,8 @@ onUnmounted(() => {
                       dragState?.type === 'segment' && dragState.segmentId === segment.id ? 'opacity-40' : '',
                     ]"
                     draggable="true"
-                    @click="seekTo(segment.startTime); projectStore.selectSegment(segment.id)"
+                    @click="(e: MouseEvent) => { if (e.ctrlKey || e.metaKey) { projectStore.toggleSegmentMultiSelect(segment.id); } else { projectStore.clearMultiSelect(); seekTo(segment.startTime); projectStore.selectSegment(segment.id); } }"
+                    @dblclick.stop="seekToSegmentTime(segment.id)"
                     @dragstart="onSegmentDragStart($event, segment.id)"
                     @dragend="onSegmentDragEnd"
                     @dragover="onSegmentDragOver($event, segment.id)"
@@ -1162,9 +1289,23 @@ onUnmounted(() => {
                     <div v-if="dragOverSegment?.segmentId === segment.id && dragOverSegment.position === 'before'" class="absolute top-0 left-2 right-2 h-0.5 bg-blue-500 rounded" />
                     <div class="flex items-start gap-2">
                       <div class="flex-1 min-w-0">
+                        <!-- Drag handle -->
+                        <div
+                          class="cursor-grab active:cursor-grabbing w-3 h-full flex-shrink-0 absolute left-0 top-0 bottom-0 flex items-center justify-center opacity-0 group-hover:opacity-50 transition-opacity"
+                          @click.stop
+                        >
+                          <svg class="w-2.5 h-2.5 text-gray-400" viewBox="0 0 24 24" fill="currentColor">
+                            <circle cx="9" cy="5" r="1.5" />
+                            <circle cx="15" cy="5" r="1.5" />
+                            <circle cx="9" cy="12" r="1.5" />
+                            <circle cx="15" cy="12" r="1.5" />
+                            <circle cx="9" cy="19" r="1.5" />
+                            <circle cx="15" cy="19" r="1.5" />
+                          </svg>
+                        </div>
                         <div
                           v-if="editingTitleId !== segment.id"
-                          class="text-sm text-gray-300 font-medium truncate cursor-text hover:text-white"
+                          class="pl-1 text-sm text-gray-300 font-medium truncate cursor-text hover:text-white"
                           @click.stop="startEditingTitle(segment.id); projectStore.selectSegment(segment.id)"
                         >
                           {{ segment.title }}
@@ -1225,35 +1366,68 @@ onUnmounted(() => {
 
                     <div
                       v-if="segment.id === projectStore.selectedSegmentId"
-                      class="mt-2 space-y-2"
+                      class="mt-2"
                       @click.stop
                     >
-                      <textarea
-                        :value="segment.comments"
-                        class="w-full bg-gray-700 text-gray-200 text-xs rounded px-2 py-1.5 h-16 resize-y border border-gray-600 focus:border-blue-500 focus:outline-none placeholder-gray-500"
-                        placeholder="Add tactical notes..."
-                        @input="projectStore.updateSegmentComments(segment.id, ($event.target as HTMLTextAreaElement).value)"
-                      />
-
-                      <div class="flex items-center gap-2">
-                        <label class="text-xs text-gray-500 shrink-0">Speed:</label>
-                        <select
-                          :value="segment.slowMotionSpeed"
-                          class="flex-1 bg-gray-700 text-gray-200 text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500 focus:outline-none"
-                          @change="projectStore.updateSegmentSlowMotionSpeed(segment.id, Number(($event.target as HTMLSelectElement).value))"
+                      <button
+                        class="flex items-center gap-1 text-[10px] text-gray-500 hover:text-gray-300 transition-colors mb-1"
+                        @click.stop="toggleSegmentInfo(segment.id)"
+                      >
+                        <svg
+                          class="w-3 h-3 transition-transform"
+                          :class="collapsedSegmentInfo.has(segment.id) ? '' : 'rotate-90'"
+                          xmlns="http://www.w3.org/2000/svg"
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
                         >
-                          <option :value="1">1x (Normal)</option>
-                          <option :value="0.75">0.75x</option>
-                          <option :value="0.5">0.5x</option>
-                          <option :value="0.25">0.25x</option>
-                        </select>
+                          <path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd" />
+                        </svg>
+                        {{ collapsedSegmentInfo.has(segment.id) ? 'Show details' : 'Hide details' }}
+                      </button>
+                      <div v-if="!collapsedSegmentInfo.has(segment.id)" class="space-y-2">
+                        <textarea
+                          :value="segment.comments"
+                          class="w-full bg-gray-700 text-gray-200 text-xs rounded px-2 py-1.5 h-16 resize-y border border-gray-600 focus:border-blue-500 focus:outline-none placeholder-gray-500"
+                          placeholder="Add tactical notes..."
+                          @input="projectStore.updateSegmentComments(segment.id, ($event.target as HTMLTextAreaElement).value)"
+                        />
+
+                        <div class="flex items-center gap-2">
+                          <label class="text-xs text-gray-500 shrink-0">Speed:</label>
+                          <select
+                            :value="segment.slowMotionSpeed"
+                            class="flex-1 bg-gray-700 text-gray-200 text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-500 focus:outline-none"
+                            @change="projectStore.updateSegmentSlowMotionSpeed(segment.id, Number(($event.target as HTMLSelectElement).value))"
+                          >
+                            <option :value="1">1x (Normal)</option>
+                            <option :value="0.75">0.75x</option>
+                            <option :value="0.5">0.5x</option>
+                            <option :value="0.25">0.25x</option>
+                          </select>
+                        </div>
                       </div>
                     </div>
                     <div v-if="dragOverSegment?.segmentId === segment.id && dragOverSegment.position === 'after'" class="absolute bottom-0 left-2 right-2 h-0.5 bg-blue-500 rounded" />
                   </div>
                   <!-- Group comments -->
                   <div class="px-4 pb-2" @click.stop>
+                    <button
+                      class="flex items-center gap-1 text-[10px] text-gray-500 hover:text-gray-300 transition-colors mb-1"
+                      @click.stop="toggleGroupComments(group.id)"
+                    >
+                      <svg
+                        class="w-3 h-3 transition-transform"
+                        :class="collapsedGroupComments.has(group.id) ? '' : 'rotate-90'"
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                      >
+                        <path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd" />
+                      </svg>
+                      {{ collapsedGroupComments.has(group.id) ? 'Show notes' : 'Hide notes' }}
+                    </button>
                     <textarea
+                      v-if="!collapsedGroupComments.has(group.id)"
                       :value="group.comments"
                       class="w-full bg-gray-700 text-gray-200 text-xs rounded px-2 py-1.5 h-10 resize-y border border-gray-600 focus:border-blue-500 focus:outline-none placeholder-gray-500"
                       placeholder="Group notes..."
