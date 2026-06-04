@@ -468,11 +468,12 @@ function onWheel(e: WheelEvent) {
   const visDur = props.duration / zoomLevel.value
 
   if (e.ctrlKey || e.metaKey) {
-    const factor = 1 - e.deltaY * 0.002
+    const factor = 1 - e.deltaY * 0.003
     const newZoom = zoomLevel.value * factor
-    zoomAtPoint(e.offsetX, newZoom)
+    const rect = canvas.getBoundingClientRect()
+    zoomAtPoint(e.clientX - rect.left, newZoom)
   } else {
-    const deltaTime = (e.deltaY / canvasWidth) * visDur * 0.5
+    const deltaTime = (e.deltaY / canvasWidth) * visDur * 0.8
     scrollOffset.value += deltaTime
     clampScroll()
   }
